@@ -1,0 +1,7 @@
+osm_type,osm_id,name,name_en,name_km,latitude,longitude
+node,9000000000000000001,Demo Riverside Cafe,Demo Riverside Cafe,កាហ្វេសាកល្បង,11.5564,104.9282
+node,9000000000000000002,Demo North Cafe,Demo North Cafe,,11.5574,104.9282
+way,9000000000000000003,"Demo Coffee, East","Demo Coffee, East",,11.5564,104.9302
+node,9000000000000000004,Demo South Cafe,Demo South Cafe,,11.5524,104.9282
+relation,9000000000000000005,Demo West Cafe,Demo West Cafe,,11.5564,104.9202
+node,9000000000000000006,Demo Distant Cafe,Demo Distant Cafe,,13.3633,103.8564

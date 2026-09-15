@@ -1,0 +1,15 @@
+.env
+.local-tls
+.venv
+.git
+__pycache__
+*.pyc
+data
+.pytest_cache
+.ruff_cache
+
+.agents
+.codex
+*.egg-info
+build
+dist
