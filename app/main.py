@@ -1,19 +1,21 @@
 """Wire the FastAPI application, services, and repositories."""
 
 from fastapi import FastAPI
-from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api.v1 import router as coffee_controller
-from app.core.config import STATIC, Settings
-from app.core.security import configure_http, register_exception_handlers
-from app.models.place import CoffeeRepository
-from app.models.road import RoutingGateway
-from app.repositories.place_repository import (
+from app.config.settings import STATIC, Settings
+from app.controller import router as coffee_controller
+from app.controller.web_controller import router as web_controller
+from app.exception.handlers import register_exception_handlers
+from app.repository.contracts import CoffeeRepository
+from app.repository.place_repository import (
     CoffeeRepository as PostgisCoffeeRepository,
 )
-from app.services.place_service import CoffeeService
-from app.services.road_service import HostedRouter, RoadService
+from app.security.http_security import configure_http
+from app.service.ors_client import HostedRouter
+from app.service.place_service import CoffeeService
+from app.service.road_service import RoadService
+from app.service.routing_gateway import RoutingGateway
 
 
 def create_app(dsn: str | None = None, router: RoutingGateway | None = None) -> FastAPI:
@@ -26,11 +28,13 @@ def create_app(dsn: str | None = None, router: RoutingGateway | None = None) -> 
     configure_http(app)
     register_exception_handlers(app)
 
-    @app.get("/", include_in_schema=False)
-    def index():
-        return FileResponse(STATIC / "index.html")
+    app.include_router(web_controller)
 
     app.include_router(coffee_controller.router, prefix="/api/v1")
     app.include_router(coffee_controller.router, prefix="/api", include_in_schema=False)
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
     return app
+
+
+# Standard ASGI entry point: uvicorn app.main:app
+app = create_app()

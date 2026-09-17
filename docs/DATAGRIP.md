@@ -8,7 +8,7 @@ connecting to PostgreSQL; DataGrip handles the database import.
 Follow the environment setup in [README.md](../README.md), start the database, and run:
 
 ```bash
-find-coffee download
+python -m scripts.data download
 ```
 
 The downloader writes `data/cambodia_cafes.csv`, `data/cambodia_cafes.geojson`, and
@@ -32,9 +32,16 @@ Add a **PostgreSQL** data source. With the unchanged `.env.example` settings:
 Download the PostgreSQL JDBC driver if DataGrip requests it. Click **Test Connection**.
 If you changed the environment settings or are using an existing server, use those values.
 
-Open a query console for this database and run the entire
-[`001_schema.sql`](../app/sql/001_schema.sql) file. Alternatively,
-`find-coffee init-db` creates the same schema. Refresh the `public` schema in DataGrip.
+From the project root with the virtual environment active, create or update the
+schema using the versioned migrations:
+
+```bash
+alembic upgrade head
+```
+
+This uses `DATABASE_URL` from `.env`; ensure it selects the same database as DataGrip.
+Migration files live in `app/resources/database/migrations/`. Refresh the `public`
+schema in DataGrip, then open a query console for this database.
 
 Verify the selected database and extension:
 
@@ -62,7 +69,7 @@ to one importer at a time; this starter uses a shared staging table.
 3. Select `data/cambodia_cafes.csv`.
 4. Select the existing table `public.coffee_shop_import`, rather than creating a new one.
 5. Use **UTF-8**, a **comma** separator, double-quote text quoting, and **First row is header**.
-6. Map the seven source columns to identically named target columns:
+6. Map the seven required source columns to identically named target columns:
 
 | CSV | PostgreSQL type |
 | --- | --- |
@@ -75,7 +82,7 @@ to one importer at a time; this starter uses a shared staging table.
 | `longitude` | `double precision` |
 
 Inspect the preview: Khmer characters should be readable, quoted commas should stay
-inside names, and every row should have seven fields. Leave conversion-error-to-NULL
+inside names, and every row should match the CSV header. Leave conversion-error-to-NULL
 behavior disabled so invalid coordinates are reported. Empty name fields may be NULL;
 the merge converts them to empty strings.
 
@@ -99,7 +106,7 @@ LIMIT 20;
 ```
 
 Compare the staging count to `count` in `data/metadata.json` for a generated download.
-Run the entire [`002_import_staging.sql`](../app/sql/002_import_staging.sql)
+Run the entire [`import_staging.sql`](../app/resources/database/queries/import_staging.sql)
 file. It inserts or updates records by OSM type/ID and leaves staging available for review.
 On an error inside that script, issue `ROLLBACK;` before fixing and retrying.
 
@@ -119,7 +126,7 @@ Stored counts may exceed the current staging count because refreshes do not dele
 
 ## 6. Run a nearest search
 
-Run [`003_nearest_example.sql`](../app/sql/003_nearest_example.sql).
+Run [`nearest_example.sql`](../app/resources/database/queries/nearest_example.sql).
 Change the example longitude/latitude and the `5000` meter radius as needed. Remove
 the `WHERE` clause to search the whole imported dataset.
 
@@ -132,7 +139,7 @@ query output; the example does not calculate a walking route.
 The CLI can import the downloader's point GeoJSON directly:
 
 ```bash
-find-coffee import-data data/cambodia_cafes.geojson
+python -m scripts.data import-data data/cambodia_cafes.geojson
 ```
 
 DataGrip can then inspect the same `coffee_shops` table. An arbitrary GeoJSON
@@ -140,3 +147,12 @@ FeatureCollection is not interchangeable with a seven-column CSV import; polygon
 geometry and nested properties require explicit conversion first.
 
 Reference: [JetBrains DataGrip import documentation](https://www.jetbrains.com/help/datagrip/import-data.html).
+
+### Optional business details
+
+Run `alembic upgrade head` before importing the extended CSV. The downloader now also
+exports `address`, `opening_hours`, `phone`, and `website`. Map those four columns to
+the identically named staging columns when present; leave them NULL for legacy files.
+The merge script preserves existing details for missing/blank values. Clear the staging
+table before each batch as above. Detail values are community records, not verified
+opening status or contact information.

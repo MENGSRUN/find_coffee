@@ -1,7 +1,7 @@
-# Include the application and all runtime dependencies.
+# Include all runtime dependencies.
 -r requirements.txt
 
-# Development dependencies. Keep aligned with pyproject.toml's dev extra.
+# Development tools.
 pytest>=8,<10
 ruff>=0.11,<1
 httpx>=0.27,<1

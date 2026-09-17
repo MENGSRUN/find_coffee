@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from scripts.cli import main
+from scripts.data import main
 
 if __name__ == "__main__":
     sample = Path(__file__).resolve().parents[1] / "examples" / "sample_cafes.csv"

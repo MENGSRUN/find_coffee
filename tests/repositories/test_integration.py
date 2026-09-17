@@ -10,8 +10,9 @@ import pytest
 from psycopg import sql
 from psycopg.conninfo import make_conninfo
 
-from app.gis.geojson import read_cafes
-from app.repositories.place_repository import import_cafes, init_db, nearest, nearest_page, sql_file
+from app.config.schema import init_db
+from app.repository.place_repository import import_cafes, nearest, nearest_page, sql_file
+from app.utils.gis.geojson import read_cafes
 
 pytestmark = pytest.mark.integration
 SAMPLE = Path(__file__).parents[2] / "examples" / "sample_cafes.csv"
@@ -89,12 +90,12 @@ def test_datagrip_staging_merge_and_name_fallback(seeded_db):
             (cafes[0].osm_type, cafes[0].osm_id, "កាហ្វេ", 11.5564, 104.9282),
         )
     with psycopg.connect(dsn, autocommit=True) as connection:
-        connection.execute(sql_file("002_import_staging.sql"))
+        connection.execute(sql_file("import_staging.sql"))
     rows = nearest(dsn, 11.5564, 104.9282)
     assert rows[0]["name"] == "កាហ្វេ"
     with psycopg.connect(dsn) as connection:
         assert connection.execute("SELECT count(*) FROM public.coffee_shops").fetchone()[0] == 6
-        assert connection.execute(sql_file("003_nearest_example.sql")).fetchall()
+        assert connection.execute(sql_file("nearest_example.sql")).fetchall()
 
 
 def test_spatial_pagination_count_order_and_empty_pages(seeded_db):
@@ -118,12 +119,15 @@ def test_alembic_adopts_existing_schema_without_losing_records(seeded_db, monkey
     from alembic.config import Config
 
     dsn, cafes = seeded_db
+    # Simulate a legacy database initialized before migration tracking existed.
+    with psycopg.connect(dsn) as connection:
+        connection.execute("DROP TABLE alembic_version")
     monkeypatch.setenv("DATABASE_URL", dsn)
     config = Config(str(Path(__file__).parents[2] / "alembic.ini"))
     command.upgrade(config, "head")
     command.upgrade(config, "head")
     with psycopg.connect(dsn) as connection:
-        assert connection.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "0001"
+        assert connection.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "0002"
         assert connection.execute("SELECT count(*) FROM coffee_shops").fetchone()[0] == len(cafes)
 
 
@@ -169,3 +173,39 @@ def test_all_page_preserves_radius_and_name_filters(seeded_db):
         "total": 0,
         "cafes": [],
     }
+
+
+def test_details_import_and_legacy_preservation(seeded_db):
+    dsn, cafes = seeded_db
+    rich = replace(
+        cafes[0],
+        address="12, Street 123",
+        opening_hours="24/7",
+        phone="+85512345678",
+        website="https://example.com",
+    )
+    import_cafes(dsn, [rich])
+    import_cafes(dsn, [cafes[0]])
+    row = nearest_page(dsn, rich.latitude, rich.longitude, 10, 1000, 1)["cafes"][0]
+    assert row["address"] == rich.address
+    assert row["website"] == rich.website
+
+
+def test_details_migration_preserves_existing_cafes(seeded_db, monkeypatch):
+    from alembic import command
+    from alembic.config import Config
+
+    dsn, cafes = seeded_db
+    with psycopg.connect(dsn) as connection:
+        for table in ("coffee_shops", "coffee_shop_import"):
+            for column in ("address", "opening_hours", "phone", "website"):
+                connection.execute(
+                    sql.SQL("ALTER TABLE {} DROP COLUMN {}").format(
+                        sql.Identifier(table), sql.Identifier(column)
+                    )
+                )
+    monkeypatch.setenv("DATABASE_URL", dsn)
+    command.stamp(Config("alembic.ini"), "0001")
+    command.upgrade(Config("alembic.ini"), "head")
+    command.upgrade(Config("alembic.ini"), "head")
+    assert len(nearest(dsn, 11.5564, 104.9282, 100)) == len(cafes)

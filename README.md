@@ -1,5 +1,9 @@
 # Find Coffee — Cambodia
 
+Separate future project: [portable offline map hardware plan](docs/OFFLINE_HARDWARE.md)
+includes Raspberry Pi and ESP32-S3 hardware recommendations. It is not an implemented
+feature or a change to this café application.
+
 A beginner-friendly Python project that downloads Cambodian cafés from OpenStreetMap,
 imports them into PostgreSQL/PostGIS, and returns nearby cafés sorted by distance.
 Use the Python CLI or DataGrip to import the same CSV dataset.
@@ -7,12 +11,29 @@ Use the Python CLI or DataGrip to import the same CSV dataset.
 Includes a mobile web UI with phone GPS, a nearby-search API, and a command-line interface.
 Tap **Use my location** to find cafés, change the radius, and open walking directions.
 Search results appear on a map with numbered café markers and a blue search location.
+Nearby markers group together when zoomed out; tap a group to expand it.
 Tap a marker for details, or use **View on map** from a café card. The café map works
 without a routing API key and displays the current page of results. Choose 10, 20,
-or 50 items per page and use the first/previous/next/last controls below the list.
+50, 100, or All items per page and use the first/previous/next/last controls below the list.
 Straight-line mode pages through all matching cafés within the radius; road mode
-pages through reachable cafés among the existing maximum of 30 candidates checked.
+checks all matching cafés and pages through those with reachable routes. Large
+road searches use multiple routing requests and remain subject to provider quotas.
 See [Phone setup](docs/PHONE.md) for using GPS over your shared Wi-Fi network.
+
+**GPS + compass tracking:** tap **Start tracking** once to start both sensors.
+GPS sets the blue marker's position; the compass rotates its arrow as you turn the
+phone, including while stationary. A dot appears when compass direction is unavailable.
+The tracking button sits beside the café search bar. Use **Search** to refresh café distances
+from your latest GPS position. **Stop tracking** stops both sensors;
+tracking also stops when the page is hidden. See [tracking setup and testing](docs/PHONE.md#track-your-movement-and-direction).
+
+**Explore and save:** move the map and press **Search this map area** to search around
+its center using the selected radius. Press **Save café** on a card to bookmark it in
+this browser; open **Saved cafés** to revisit or remove bookmarks.
+
+**Route progress:** while tracking, open a café route to see estimated distance
+remaining and off-route status. Progress updates locally without automatic routing calls.
+See [how to test route progress](docs/PHONE.md#route-progress-first-feature-to-test).
 
 **Road routes:** set `ORS_API_KEY` in `.env`, restart the web server, and choose
 **Road distance**. The app uses hosted openrouteservice for walking/driving distances,
@@ -22,14 +43,14 @@ Without a key, distances are explicitly labeled as straight-line. No self-hosted
 ## Open the UI
 
 After installation and database setup below, choose the matching protocol.
-`find-coffee serve` starts **HTTP only**; opening `https://localhost:8000` against
+`uvicorn app.main:app --no-access-log` starts **HTTP only**; opening `https://localhost:8000` against
 that server causes `ERR_SSL_PROTOCOL_ERROR` and “Invalid HTTP request received.”
 
 For a local HTTP preview:
 
 ```bash
 source .venv/bin/activate
-find-coffee serve
+uvicorn app.main:app --no-access-log
 ```
 
 Open **http://localhost:8000** on this computer. Use the Phnom Penh preview to browse
@@ -61,7 +82,7 @@ Run commands from this project directory. These commands use Bash on Linux/macOS
    ```
 
    For development and testing, use `requirements-dev.txt` instead; it also includes
-   the runtime dependencies and installs the `find-coffee` command.
+   the runtime dependencies plus pytest, Ruff, and HTTPX.
 
 4. **Create `.env`.** Keep your existing file if you have already configured it.
 
@@ -87,9 +108,9 @@ Run commands from this project directory. These commands use Bash on Linux/macOS
 
    ```bash
    if [ ! -f data/cambodia_cafes.geojson ]; then
-     find-coffee download
+     python -m scripts.data download
    fi
-   find-coffee import-data data/cambodia_cafes.geojson
+   python -m scripts.data import-data data/cambodia_cafes.geojson
    ```
 
    Skip the import when your database already contains the café data.
@@ -101,7 +122,7 @@ Run commands from this project directory. These commands use Bash on Linux/macOS
    current Wi-Fi IP, reuse them. Stop any previous server with **Ctrl+C**, then run:
 
    ```bash
-   find-coffee serve --host 0.0.0.0 --port 8443 \
+   uvicorn app.main:app --no-access-log --host 0.0.0.0 --port 8443 \
      --ssl-certfile .local-tls/server.crt \
      --ssl-keyfile .local-tls/server.key
    ```
@@ -111,7 +132,7 @@ Run commands from this project directory. These commands use Bash on Linux/macOS
    The browser/device must trust the local CA. `localhost` on a phone refers to
    the phone itself. Keep the terminal running; **Ctrl+C** stops the server.
 
-   For a computer-only HTTP preview, you can instead run `find-coffee serve` and
+   For a computer-only HTTP preview, you can instead run `uvicorn app.main:app --no-access-log` and
    open **http://localhost:8000**. Changing `http` to `https` in the address bar
    does not enable TLS on the server.
 
@@ -120,7 +141,7 @@ On later runs, reuse your existing certificate and start HTTPS with:
 ```bash
 source .venv/bin/activate
 docker compose up -d --wait db
-find-coffee serve --host 0.0.0.0 --port 8443 \
+uvicorn app.main:app --no-access-log --host 0.0.0.0 --port 8443 \
   --ssl-certfile .local-tls/server.crt \
   --ssl-keyfile .local-tls/server.key
 ```
@@ -134,29 +155,29 @@ table write access; searches need read access.
 
 ```bash
 # Download both normalized CSV and point GeoJSON, plus source metadata.
-find-coffee download
+python -m scripts.data download
 
 # Explicitly refresh the generated local files.
-find-coffee download --overwrite
+python -m scripts.data download --overwrite
 
 # Create the initial schema; safe to repeat on this project's schema.
 alembic upgrade head
 
 # Either file format follows the same validation and upsert path.
-find-coffee import-data data/cambodia_cafes.csv
-find-coffee import-data data/cambodia_cafes.geojson
+python -m scripts.data import-data data/cambodia_cafes.csv
+python -m scripts.data import-data data/cambodia_cafes.geojson
 
 # Nearest five across all imported cafés, with no radius restriction.
-find-coffee nearest --lat 11.5564 --lon 104.9282
+python -m scripts.data nearest --lat 11.5564 --lon 104.9282
 
 # Up to five within 5,000 meters; zero to four results is also valid.
-find-coffee nearest --lat 11.5564 --lon 104.9282 --radius-m 5000
+python -m scripts.data nearest --lat 11.5564 --lon 104.9282 --radius-m 5000
 
 # Structured output for another script.
-find-coffee nearest --lat 11.5564 --lon 104.9282 --limit 10 --json
+python -m scripts.data nearest --lat 11.5564 --lon 104.9282 --limit 10 --json
 
 # Show all available commands.
-find-coffee --help
+python -m scripts.data --help
 ```
 
 The CLI reads `.env` from the current directory. Existing environment variables take
@@ -167,8 +188,8 @@ Private.coffee public Overpass instance; override `OVERPASS_URL` to use another 
 To try the import without downloading OSM, use the explicitly fictional example:
 
 ```bash
-find-coffee import-data examples/sample_cafes.csv
-find-coffee nearest --lat 11.5564 --lon 104.9282 --radius-m 5000
+python -m scripts.data import-data examples/sample_cafes.csv
+python -m scripts.data nearest --lat 11.5564 --lon 104.9282 --radius-m 5000
 ```
 
 Use a separate demo database for that sample. Its reserved-looking high numeric IDs
@@ -179,28 +200,30 @@ are synthetic, and its names and locations are not verified businesses.
 Use `alembic upgrade head` to create or baseline the database schema. Alembic reads
 `DATABASE_URL` from `.env`; existing café records are preserved.
 
-The FastAPI implementation now lives in the root-level `app/` package:
+The FastAPI backend uses Spring-style MVC layers in the root `app/` package:
 
 ```text
 app/
-    main.py          Application factory
-    core/            Configuration, connections, HTTP headers and logging
-    api/v1/          Versioned places and roads endpoints
-    models/          Domain records
-    schemas/         HTTP request validation
-    repositories/    PostGIS persistence and contracts
-    services/        Search and routing use cases
-    gis/             Coordinate validation and data conversion
-    utils/           Pagination and response helpers
-    static/          Map UI
-    sql/             Schema and import queries
+    main.py          Application factory and standard ASGI entry point
+    base/            Shared request validation and pagination
+    config/          Settings, database connections and dependency injection
+    constant/        Routing constants
+    controller/      Web and REST controllers
+    entity/          Café domain record
+    exception/       Application errors and HTTP exception advice
+    model/           Request DTOs, response mapping and service inputs
+    repository/      PostGIS implementation and persistence contract
+    security/        Browser security and privacy headers
+    service/         Search, routing and data download logic
+    utils/gis/       Coordinate validation and data conversion
+    resources/       Static map UI and SQL scripts
 ```
 
-See [PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md) for the complete tree, reserved
-GIS modules, API paths, migration status, Dockerfile and script usage. The browser
-uses `/api/v1`; `/api` remains a compatibility alias. Existing installations should
-run `pip install -r requirements.txt` once, then restart the web server. The explicit
-factory is `uvicorn app.main:create_app --factory --no-access-log`.
+See [PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md) for the complete tree and Spring
+concept mapping. The startup command remains `uvicorn app.main:app --no-access-log`;
+add `--reload` for development. The browser uses `/api/v1`; `/api` remains a compatibility
+alias. Restart the server after restructuring. The refactor requires no new dependencies,
+environment variables, or database migration. DataGrip SQL is now in `app/resources/database/queries/`.
 
 ## Data and distance semantics
 
@@ -209,7 +232,7 @@ factory is `uvicorn app.main:create_app --factory --no-access-log`.
   status depend on community contributions.
 - Ways and relations are represented by bounding-box centers. These are approximate
   shop locations, not verified entrances. The downloader exports **Point** GeoJSON.
-- Imports accept this project's seven-column CSV or its Point GeoJSON schema.
+- Imports accept this project's CSV (seven required columns plus optional business details) or its Point GeoJSON schema.
   Arbitrary Overpass Turbo polygon exports need preprocessing; they are rejected
   with a message instead of silently converted.
 - Latitude and longitude are validated as finite WGS84 coordinates. PostGIS stores
@@ -281,3 +304,26 @@ The fictional sample is not extracted from OSM.
 - [PostGIS ST_Distance](https://postgis.net/docs/ST_Distance.html)
 - [Psycopg usage](https://www.psycopg.org/psycopg3/docs/basic/usage.html)
 - [PostGIS Docker image](https://github.com/postgis/docker-postgis)
+
+## Café details: update an existing installation
+
+Stop the web server, activate your environment, then run:
+
+```bash
+alembic upgrade head
+python -m scripts.data download --output-dir data/with-details
+python -m scripts.data import-data data/with-details/cambodia_cafes.geojson
+```
+
+Restart the server using your usual HTTPS command. Search and expand **Café details**
+on a card. Address, recorded opening hours, phone, and website appear when mapped in
+OSM; missing values are labelled. Existing normalized exports have no business details,
+so importing the same older file cannot populate them. Downloading needs internet but
+no ORS key. If `data/with-details` already exists, reuse it or pass `--overwrite` to
+explicitly refresh those generated files.
+
+The migration preserves existing cafés. Legacy imports and blank detail fields preserve
+previously stored details; populated details update on reimport. This conservative merge
+does not automatically remove outdated contact information. To clear a known incorrect
+value, explicitly update that column in PostGIS. Opening hours are displayed as raw OSM
+text and are not used to claim that a business is currently open.

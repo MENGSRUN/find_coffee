@@ -8,7 +8,7 @@ import pytest
 ROOT = Path(__file__).parents[2] / "app"
 
 
-@pytest.mark.parametrize("layer", ["models", "services"])
+@pytest.mark.parametrize("layer", ["entity", "service", "model/projection"])
 def test_inner_layers_do_not_import_frameworks_or_adapters(layer):
     paths = list((ROOT / layer).glob("*.py"))
     assert paths
@@ -16,10 +16,12 @@ def test_inner_layers_do_not_import_frameworks_or_adapters(layer):
         "fastapi",
         "pydantic",
         "psycopg",
-        "app.api",
+        "app.controller",
+        "app.config",
+        "app.security",
         "app.clients",
         "find_coffee",
-        "app.repositories.place_repository",
+        "app.repository.place_repository",
     )
     for path in paths:
         for node in ast.walk(ast.parse(path.read_text())):

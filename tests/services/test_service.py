@@ -5,12 +5,13 @@ from unittest.mock import Mock
 import pytest
 from fastapi.testclient import TestClient
 
-from app.api.dependencies import get_coffee_service
+from app.config.dependencies import get_coffee_service
+from app.exception.errors import CafeNotFound, SearchNotConfigured
 from app.main import create_app
-from app.models.location import NearbyQuery, RouteQuery
-from app.services.place_service import CoffeeService
-from app.services.road_service import HostedRouter, RoadService
-from app.utils.response import CafeNotFound, SearchNotConfigured
+from app.model.projection.search_query import NearbyQuery, RouteQuery
+from app.service.ors_client import HostedRouter
+from app.service.place_service import CoffeeService
+from app.service.road_service import RoadService
 
 
 def test_service_can_run_without_fastapi_and_preserves_page():

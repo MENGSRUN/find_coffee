@@ -1,9 +1,11 @@
 # Use your phone GPS on the same Wi-Fi
 
-The UI requests location only when you tap **Use my location**. It sends coordinates
-to this app's Python API to query PostGIS. Road mode also sends the start and café
+The UI requests location when you tap **Use my location** or **Start tracking**.
+Use my location reads once and sends coordinates to this app's Python API to query
+PostGIS. Tracking updates the live map locally; **Search** explicitly searches
+from the latest tracking position. Road mode also sends the start and café
 coordinates to hosted openrouteservice. Search-result and route maps load OpenStreetMap tiles.
-The app does not save GPS or load tracking scripts; map tiles use normal browser caching.
+The app does not save GPS history or load analytics scripts; map tiles use normal browser caching.
 See [ROUTING.md](ROUTING.md) for API-key setup and data sharing.
 
 Your phone and computer must be on the same Wi-Fi, and the computer must stay awake
@@ -74,7 +76,7 @@ In another terminal at the project root:
 ```bash
 source .venv/bin/activate
 docker compose up -d --wait
-find-coffee serve --host 0.0.0.0 --port 8443 \
+uvicorn app.main:app --no-access-log --host 0.0.0.0 --port 8443 \
   --ssl-certfile .local-tls/server.crt \
   --ssl-keyfile .local-tls/server.key
 ```
@@ -104,15 +106,76 @@ central Phnom Penh** button uses an explicitly labeled example location, not you
 Above **Cafés around you**, search by café name and choose **Items per page**
 (10, 20, 50, 100, or All) to the right. Click **Search** to apply the name filter or **Clear**
 to remove it. Searches match English and Khmer names within the selected radius;
-road mode ranks at most 30 matching cafés. Below the list, use the first,
+road mode checks all matching cafés. Below the list, use the first,
 previous, next, or last-page buttons. The footer shows the visible range and total.
 The map follows the current page. Straight-line searches can page through every
-matching café within the radius. Road searches page through reachable cafés among
-up to 30 checked candidates; paging reuses the results without extra routing calls.
+matching café within the radius. Road searches page through all reachable matching cafés; paging reuses the results without extra routing calls.
+
+## Track your movement and direction
+
+1. Tap **Start tracking** beside the café search bar. It starts GPS and compass together. Allow location
+   and motion/orientation access if asked; your browser may show separate permission
+   prompts even though the app has one button.
+2. GPS places one blue marker on the map. Hold the phone flat, screen up, and turn it:
+   the compass rotates that marker's arrow, even while you stand still. The readout
+   says **Phone points E · 90°**. North is 0°, east 90°, south 180°, and west 270°.
+3. A blue dot means GPS is available but compass direction is unavailable. A status
+   message explains compass permission or sensor problems. GPS speed, GPS heading,
+   and movement-derived bearings are not used as substitutes for phone direction.
+   The shaded circle represents GPS accuracy in meters.
+4. The map automatically follows your live position. Dragging the map, focusing a
+   café, or choosing Show all results pauses following. Search again to resume following.
+5. Tap **Search** beside the café name field to update café results from the latest GPS position. Until then,
+   café distances, route previews, and Google Maps links keep their original search
+   position. Sensor updates do not call the café or routing APIs. The combined marker
+   also appears on an open route preview without recalculating its route.
+6. Tap **Stop tracking** to stop both sensors and remove the live overlays. Tracking
+   also stops when the page becomes hidden or is left; tap Start tracking after returning.
+   Keep the page visible and the phone unlocked. This is not background navigation.
+
+`app/resources/static/tracking.js` owns the combined lifecycle. It calls the compass permission
+request directly during the button tap, then starts `watchPosition()` without waiting
+for the compass result. Compass denial leaves GPS usable; GPS permission denial stops
+both. Stopping or hiding the page invalidates pending permission requests so a late
+approval cannot restart sensors. A new start retries both permissions.
+
+GPS uses high accuracy and no cached fixes. A position expires after 15 seconds:
+live map overlays disappear and Search waits for a fresh fix before using tracking.
+Compass readings may continue updating the status while waiting for GPS, but
+cannot create a map location. No location history is stored. Moving maps still request
+OpenStreetMap tiles, which reveal the viewed area to the tile provider.
+
+See [watchPosition](https://developer.mozilla.org/en-US/docs/Web/API/Geolocation/watchPosition).
+
+## Phone compass: turn while standing still
+
+The compass starts automatically with **Start tracking**. There is no separate
+compass button. Hold the phone reasonably flat, screen facing up, and turn it. Both
+its status and the arrow at your GPS location show where the phone's physical top edge
+points. You can test rotation while standing at your desk; no walking is required.
+
+`app/resources/static/compass.js` uses Safari's `webkitCompassHeading` when supplied, or an
+absolute orientation event with a north reference. For a screen-up phone, standard
+orientation yields `(360 - alpha) % 360`. Relative-only rotation has no north reference
+and is not displayed as a compass. The standard path asks you to hold the phone flatter
+if tilt exceeds 60°; Safari readings with reported accuracy worse than 30° or an
+invalid calibration flag are hidden. Sensor north/accuracy depends on the device and
+calibration. Metal objects and magnetic interference can affect readings.
+
+The compass updates on sensor events, at most once per display frame, without waiting
+for GPS movement. A reading older than five seconds is hidden; eight seconds without
+an initial usable reading produces an availability message. Unsupported browsers,
+denied permission, and missing north-referenced sensors produce clear status messages.
+No relative heading is silently substituted. Stop tracking removes compass listeners
+and clears the GPS watch; both also stop when the page is hidden or left. No sensor readings are sent to the API
+or stored. You do not need another API key, PostGIS table, or GPS fix for the compass dial.
+
+See the [device orientation specification](https://www.w3.org/TR/orientation-event/)
+for the coordinate-frame and screen-up compass calculation.
 
 ## Troubleshooting
 
-`find-coffee serve` without certificate flags starts HTTP on port 8000. Opening
+`uvicorn app.main:app --no-access-log` without certificate flags starts HTTP on port 8000. Opening
 `https://localhost:8000` against that HTTP server causes `ERR_SSL_PROTOCOL_ERROR`
 and “Invalid HTTP request received” messages. Stop it with Ctrl+C and use the
 HTTPS command above, then open port **8443** with `https://`.
@@ -141,7 +204,7 @@ The browser uses `POST /api/v1/nearby` with a JSON body, keeping GPS coordinates
 
 The response contains `cafes`, `total`, `page`, `page_size`, `total_pages`, and,
 in road mode, routing metadata. The UI fetches the full road candidate set once with
-`limit: 50` and pages it locally. IDs are strings to preserve PostgreSQL BIGINT
+`limit: "all"` and pages it locally. IDs are strings to preserve PostgreSQL BIGINT
 precision in JavaScript. Invalid coordinates/radius/limit return 422; database failures
 return a generic 503. Responses are not cached, and the built-in server disables access
 logs. No API endpoint writes location data to the database. This setup is for local
@@ -160,3 +223,156 @@ It requires the Node `playwright` package and a Chromium installation. Run with
 `node tests/api/browser_smoke.cjs`; `PLAYWRIGHT_MODULE` can point to an existing Playwright
 module, `CHROMIUM_PATH` to a browser executable, and `APP_URL` to a localhost preview.
 It writes desktop and mobile screenshots under `/tmp/find-coffee-*.png`.
+
+`tests/api/browser_tracking.cjs` uses simulated GPS and mocked API responses without
+a running app. It checks direction, accuracy, map following, explicit search refresh,
+stale locations, and stopping on permission denial or a hidden page. Run it with the
+same `PLAYWRIGHT_MODULE` and `CHROMIUM_PATH` settings as the other browser checks.
+
+### Test direction without walking outside
+
+Use automated GPS simulation after changing tracking code. The tracking browser test
+supplies controlled coordinates, speed, accuracy, and timestamps. It checks map
+movement, GPS-only fallback when compass is unsupported, stale fixes, search refresh,
+and permission errors. GPS heading changes must not invent a phone compass bearing.
+No real GPS, running FastAPI server, PostGIS, or ORS key is required.
+
+With Playwright available to Node and its Chromium browser installed:
+
+```bash
+node tests/api/browser_tracking.cjs
+```
+
+If Node reports that it cannot find Playwright, this optional one-time setup keeps
+browser test dependencies outside the Python project (requires Node.js/npm and internet):
+
+```bash
+npm install --prefix /tmp/find-coffee-browser-tests playwright
+node /tmp/find-coffee-browser-tests/node_modules/playwright/cli.js install chromium
+PLAYWRIGHT_MODULE=/tmp/find-coffee-browser-tests/node_modules/playwright \
+  node tests/api/browser_tracking.cjs
+```
+
+The temporary install may need repeating after `/tmp` is cleared. If you already
+have a compatible Chromium executable, set `CHROMIUM_PATH` to it instead of downloading
+Playwright's browser. Run from the project root. A successful run prints
+`Tracking checks passed`.
+
+For the phone compass, run:
+
+```bash
+PLAYWRIGHT_MODULE=/tmp/find-coffee-browser-tests/node_modules/playwright \
+  node tests/api/browser_compass.cjs
+```
+
+This simulates stationary N/E/S/W turns, the 359°/0° boundary, Safari headings,
+absolute and relative sensor events, tilt, poor calibration, permission denial,
+unsupported browsers, stale readings, and stopping while permission is pending.
+It also checks that one tap starts both sensors, compass denial keeps GPS usable,
+GPS denial stops both, and compass rotation does not change GPS position or call the API.
+A successful run prints `Compass checks passed`.
+
+For manual location testing in Chrome, open DevTools, press **Ctrl+Shift+P**, choose
+**Show Sensors**, and set **Location** to a custom latitude/longitude. Change the
+coordinates to move the marker, or choose **Location unavailable** to test an error.
+This checks location behavior; use the automated fixtures for repeatable headings,
+speed, and accuracy. The Sensors **Orientation** controls simulate turning the device,
+but a relative-only event is insufficient for a compass; use `browser_compass.cjs`
+for deterministic north-referenced compass tests. The app uses orientation for
+direction and GPS for position.
+See [Chrome Sensors documentation](https://developer.chrome.com/docs/devtools/sensors).
+
+### Check real sensors after simulation
+
+GPS location updates arrive when the browser provides fixes; `timeout: 15000` is an
+error timeout, not a polling interval. Compass rotation updates on orientation events,
+at most once per display frame, without waiting for GPS displacement. Direction and
+position can therefore update at different rates. The browser and phone determine
+sensor availability and delivery frequency.
+
+A short outdoor check is useful when changing GPS behavior or before sharing a release,
+rather than after every code edit. Keep the HTTPS page visible, walk a short path,
+stop, and check the position and accuracy circle. For direction, stand still indoors,
+tap Start tracking, and rotate the phone. Test away from metal or magnets if the bearing
+looks wrong. Simulated tests verify our logic; the real phone verifies its permissions,
+sensors, and reception. Neither GPS nor sensor simulation consumes routing quota unless
+you explicitly search for cafés or request a route against the live app.
+
+## Route progress (first feature to test)
+
+1. Tap **Start tracking** and allow location/compass access.
+2. Press **Search**, then choose a café and **Show route on map**.
+3. With the page visible, walk along that route. The route panel shows approximate
+   distance remaining along its line and the percentage completed.
+4. Move away from the route to check the off-route message. It appears when the
+   distance exceeds both 30 m and twice the reported GPS accuracy.
+5. To request a new route, press **Search** and select **Show route on map** again.
+   Tracking never automatically requests routes.
+
+Remaining distance is measured along the displayed polyline, excluding access gaps
+between the road and the café entrance. It can differ slightly from the provider's
+route total. This is an estimate, not turn-by-turn navigation or a live ETA. Progress
+can move backwards when you backtrack. Poor GPS accuracy (over 50 m), stale fixes,
+and ambiguous positions near crossings pause estimates. Near the endpoint, verify
+the actual entrance; the app does not claim you have arrived at the café.
+
+Run deterministic geometry/status checks without walking or any external services:
+
+```bash
+node tests/api/route_progress.cjs
+```
+
+The existing `browser_tracking.cjs` also checks that displaying and closing a route
+connects and clears progress, without additional API calls from GPS updates.
+
+## Café marker clustering (second feature to test)
+
+Choose **100** or **All** items per page and zoom out on the café map. Green groups
+show how many cafés they contain, not a café's list number. Tap a group to zoom in;
+markers at identical coordinates spread apart so you can select each one. Individual
+markers retain their list numbers and existing popup actions. **View on map** on a
+card reveals that café even when it is inside a group. Expanding a group pauses live
+map following so GPS updates do not pull you away while browsing.
+
+Only cafés on the current result page are clustered. The blue search/GPS markers
+and route progress remain separate. Changing page or searching replaces the previous
+groups. Clustering runs in the browser and makes no extra search or routing requests.
+
+The app serves Leaflet.markercluster 1.5.3 locally (`leaflet.markercluster.js` and
+`MarkerCluster.css`); its MIT license is in `app/resources/static/leaflet.markercluster.LICENSE`.
+Assets come from the pinned npm release of the [Leaflet plugin](https://github.com/Leaflet/Leaflet.markercluster).
+If the plugin cannot load, individual café markers remain available.
+
+## Search this map area
+
+Move the café map to the place you want to explore, then press **Search this map area**.
+The search uses its center, the selected radius, travel mode, distance mode, and café-name
+filter. It resets pagination. The radius is measured from the center, not the rectangular
+map bounds. Panning/zooming alone makes no search or routing requests. If GPS tracking
+is active, map-area search pauses following and keeps the chosen map center as the
+search origin. The regular **Search** button uses live GPS again while tracking.
+
+## Saved cafés
+
+Press **Save café** on a result card. Open **Saved cafés** above the map to see bookmarks,
+remove one, open its OSM page, or search around its location. No account is needed.
+Bookmarks survive reloads in the same browser and site origin. HTTP versus HTTPS,
+localhost versus a LAN IP, different ports, and a different phone/browser each have
+separate storage. Clearing browser data removes bookmarks. Storage errors are shown
+without claiming a save succeeded.
+
+Only OSM identity, café name, and café coordinates are saved. User GPS, calculated
+distances, routes, and credentials are not stored. Saved information is a snapshot;
+a café may close or change after saving. A new nearby search reads the current database.
+
+## Feature completion checklist
+
+- Route progress: simulated on/off-route, low-accuracy and stale GPS checks.
+- Marker clustering: dense and coincident cafés, page changes and fallback checks.
+- Café details: import/export, migration, contact-link safety and missing details checks.
+- Map-area search: map center, selected radius and request behavior checks.
+- Saved cafés: reload persistence, removal, search origin and storage-failure checks.
+
+Run `node tests/api/route_progress.cjs` and the `browser_map.cjs`, `browser_tracking.cjs`,
+`browser_compass.cjs`, and `browser_pagination.cjs` suites with the Playwright setup above.
+Real sensor quality and business-data accuracy still need checking on your phone.

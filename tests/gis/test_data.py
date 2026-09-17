@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from app.gis.geojson import Cafe, read_cafes, write_csv, write_geojson
+from app.utils.gis.geojson import Cafe, read_cafes, write_csv, write_geojson
 
 SAMPLE = Path(__file__).parents[2] / "examples" / "sample_cafes.csv"
 
@@ -114,3 +114,25 @@ def test_sample_file_has_six_valid_fictional_records():
     cafes = read_cafes(SAMPLE)
     assert len(cafes) == 6
     assert all(cafe.name.startswith("Demo ") for cafe in cafes)
+
+
+@pytest.mark.parametrize("kind", ["csv", "geojson"])
+def test_business_details_round_trip(tmp_path, valid_row, kind):
+    cafe = Cafe.from_mapping(
+        {
+            **valid_row,
+            "address": "12, Street 123, Phnom Penh",
+            "opening_hours": "Mo-Su 07:00-20:00",
+            "phone": "+855 12 345 678",
+            "website": "https://example.com",
+        }
+    )
+    path = tmp_path / f"details.{kind}"
+    (write_csv if kind == "csv" else write_geojson)(path, [cafe])
+    assert read_cafes(path) == [cafe]
+
+
+@pytest.mark.parametrize("field", ["address", "opening_hours", "phone", "website"])
+def test_invalid_business_details_rejected(valid_row, field):
+    with pytest.raises(ValueError):
+        Cafe.from_mapping({**valid_row, field: ["invalid"]})

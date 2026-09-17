@@ -33,9 +33,9 @@ empty/error states, tile failure, and mobile layout with mocked API and tile dat
 
 ### Result pagination
 
-Above the map heading, a café-name search and adjacent selector offer 10, 20, or
-50 items per page. The name filter is applied in PostGIS before counting, paging,
-and selecting up to 30 road candidates. It matches literal case-insensitive
+Above the map heading, a café-name search and adjacent selector offer 10, 20, 50, 100, or
+All items per page. The name filter is applied in PostGIS before counting, paging,
+and selecting all matching road candidates. It matches literal case-insensitive
 substrings across name/name_en/name_km. Search and Clear reset to page one.
 The list footer offers a result range (for example,
 11–20 of 45), the current/total pages, and first/previous/next/last controls. Café
@@ -52,11 +52,11 @@ Straight-line mode uses one PostGIS statement to count matches within the radius
 and fetch the requested page, sorted by distance, OSM type, and OSM ID. The count
 and rows share a database snapshot. Separate page requests can reflect later imports.
 
-Road mode keeps the existing 30-candidate limit. The UI requests the full ranked
-set with `limit: 50, page: 1`, then pages those reachable results in memory. Page
-navigation and page-size changes make no additional ORS calls. A new search
-replaces this in-memory result set. This does not increase routing coverage beyond
-the 30 checked candidates. Direct API road-page requests each rerun routing.
+Road mode retrieves every matching café, routes them in batches of 500, and sorts
+all reachable results globally. The UI requests `limit: "all", page: 1` and pages
+the complete ranked set locally. Page changes do not make routing calls. Batch
+failures fail the entire search; partial rankings are never returned as complete.
+There is no fixed candidate cap. Hosted provider quotas still apply; see ROUTING.md.
 
 Validation: `tests/api/browser_pagination.cjs` uses mocked API/tile data to check
 navigation, last-page boundaries, page-size/filter resets, global marker ranks,
@@ -67,12 +67,12 @@ counts, radius filtering, and empty/out-of-range pages in a disposable test data
 ## Architecture
 
 The FastAPI runtime now uses the root-level `app/` structure documented in
-[PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md): `api/v1` validates requests and calls
-`services`, which use repository/routing contracts. `repositories` owns PostGIS SQL,
-`services` handles external providers, and `gis` holds coordinate/data helpers.
+[PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md): `controller` validates requests and calls
+`service`, which uses repository/routing contracts. `repository` owns PostGIS SQL,
+`service` handles external providers, and `utils/gis` holds coordinate/data helpers.
 The browser uses `/api/v1`; old `/api` endpoints remain compatibility aliases.
-The database schema and phone HTTPS setup are unchanged. Reserved GIS modules
-have no endpoints or data tables yet.
+The database schema and phone HTTPS setup are unchanged. Empty placeholder modules
+have been removed; the structure contains implemented features.
 
 ```mermaid
 flowchart LR
@@ -111,7 +111,7 @@ Add GIS transformation tooling when polygon processing or more advanced analysis
 | `latitude` | finite number | WGS84 latitude, -90 through 90 |
 | `longitude` | finite number | WGS84 longitude, -180 through 180 |
 
-The CSV has all seven named columns. Missing names are empty strings, not grounds to
+The CSV has seven required columns and four optional business-detail columns. Missing names are empty strings, not grounds to
 discard a café. Coordinates and identifiers are mandatory. GeoJSON uses the same
 identifier/name properties and obtains coordinates from `geometry.coordinates` in
 `[longitude, latitude]` order. Only two-dimensional WGS84 Points are accepted.
@@ -132,7 +132,7 @@ stays consistent with numeric coordinates. A GiST index supports radius filterin
 Constraints enforce the OSM type, positive ID, and coordinate bounds.
 
 `coffee_shop_import` is a staging table for DataGrip's CSV importer. It contains only
-the seven input columns, allowing a user to inspect and commit imported rows before
+the required input columns and optional business details, allowing a user to inspect and commit imported rows before
 merging them into the application table.
 
 Python validates an entire input file before opening the import transaction. Exact
@@ -147,9 +147,11 @@ DataGrip's CSV upload and subsequent merge are two separate stages. Review the u
 for errors before merging; otherwise only the successfully uploaded staging rows could
 be merged. The merge itself is transactional. See [DATAGRIP.md](DATAGRIP.md).
 
-`001_schema.sql` initializes this version and may be rerun. It is not a migration
-framework and does not alter incompatible pre-existing tables. Use an empty project
-database; introduce versioned migrations before making future schema changes.
+Alembic migrations in `app/resources/database/migrations/` are the single source of
+schema changes. Run `alembic upgrade head` to apply pending revisions; `python -m
+scripts.data init-db` uses the same migrations. Repeated setup preserves café data.
+The baseline can adopt the existing project schema; independently modified schemas
+need review. Data-operation SQL lives separately in `app/resources/database/queries/`.
 
 ## PostGIS and CLI nearest-search behavior
 
@@ -174,10 +176,10 @@ identical to exact spheroidal `ST_Distance` ordering without considering that tr
 SQL values are bound through Psycopg parameters. Coordinates never become SQL text.
 The only conditional SQL fragment is a fixed radius-filter clause owned by the app.
 
-The web UI can separately request road mode: PostGIS supplies up to 30 candidates,
+The web UI can separately request road mode: PostGIS supplies all matching candidates,
 hosted openrouteservice ranks their route distances, and a selected café gets a detailed
 route map and instructions. The API's road fields are distinct from the straight-line
-fields. See [ROUTING.md](ROUTING.md) for shortlist limitations and failure handling.
+fields. See [ROUTING.md](ROUTING.md) for provider limits and failure handling.
 
 ## Failure handling and operation
 
@@ -198,12 +200,12 @@ fields. See [ROUTING.md](ROUTING.md) for shortlist limitations and failure handl
 
 | Phase | Delivered files | Acceptance |
 | --- | --- | --- |
-| Local setup | `pyproject.toml`, `.env.example`, `docker-compose.yml` | CLI installs; local PostGIS becomes healthy |
-| Data preparation | `app/gis/geojson.py`, `app/services/location_service.py` | CSV and GeoJSON round-trip Khmer names and coordinates; partial/error responses fail |
-| Database | `001_schema.sql`, `app/repositories/place_repository.py`, `upsert.sql` | Schema initializes twice; repeat import preserves row count; coordinate changes update geography |
-| DataGrip workflow | `DATAGRIP.md`, `002_import_staging.sql` | Seven CSV columns map cleanly; staging merge updates existing IDs |
-| Search | `scripts/cli.py`, `app/repositories/place_repository.py`, `003_nearest_example.sql` | Meter distances sort correctly; radius exclusions and no-result cases behave correctly |
-| Hosted routes | `app/services/`, `app/services/`, `app/api/`, `app/static/` | Route distances rerank candidates; selected geometry and steps render; missing keys/errors never masquerade as road results |
+| Local setup | `requirements.txt`, `.env.example`, `docker-compose.yml` | Dependencies install; local PostGIS becomes healthy |
+| Data preparation | `app/utils/gis/geojson.py`, `app/service/location_service.py` | CSV and GeoJSON round-trip Khmer names and coordinates; partial/error responses fail |
+| Database | `app/resources/database/migrations/`, `app/repository/place_repository.py`, `upsert.sql` | Schema initializes twice; repeat import preserves row count; coordinate changes update geography |
+| DataGrip workflow | `DATAGRIP.md`, `import_staging.sql` | Seven CSV columns map cleanly; staging merge updates existing IDs |
+| Search | `scripts/data.py`, `app/repository/place_repository.py`, `nearest_example.sql` | Meter distances sort correctly; radius exclusions and no-result cases behave correctly |
+| Hosted routes | `app/service/`, `app/controller/`, `app/resources/static/` | Route distances rerank candidates; selected geometry and steps render; missing keys/errors never masquerade as road results |
 | Verification | `tests/` | Unit tests pass; integration tests pass against a disposable PostGIS database |
 
 Unit tests use deterministic synthetic inputs and mocked HTTP responses. Integration
@@ -216,7 +218,7 @@ business freshness require a separate manual review; test fixtures do not establ
 2. Add continuous navigation if needed; embedded route maps and street instructions are implemented.
 3. Add closure/removal reconciliation, per-object provenance, and a refresh history.
 4. Review possible duplicate real-world shops across different OSM objects.
-5. Improve nearest-by-road candidate selection beyond the current 30-café shortlist.
+5. Add background search jobs and cancellation for very large routing requests.
 
 ## Technical references
 
@@ -232,6 +234,6 @@ business freshness require a separate manual review; test fixtures do not establ
 
 The page-size selector supports 10, 20, 50, 100 and All. `limit: "all"` requests
 all matching cafés in straight-line mode, preserving radius/name filters and
-returning a single page. Road mode still uses its existing maximum of 30 candidates;
-All shows the full reachable shortlist without another routing call. Switching
+returning a single page. Road mode checks all matching cafés;
+All shows the full reachable result set without another routing call. Switching
 page size resets to page one. All can render many markers and cards at once.

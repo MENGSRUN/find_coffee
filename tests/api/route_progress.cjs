@@ -1,0 +1,36 @@
+// Pure geometry and display checks; no browser, network, or real GPS needed.
+const assert = require('node:assert/strict');
+const {readFileSync} = require('node:fs');
+const vm = require('node:vm');
+const path = require('node:path');
+const panel = {hidden: true, textContent: ''};
+const context = {window: {}, document: {getElementById: () => panel}, Date};
+vm.runInNewContext(readFileSync(path.join(__dirname, '../../app/resources/static/route-progress.js'), 'utf8'), context);
+const api = context.window.coffeeRouteProgress;
+const points = [[0, 0], [0.01, 0], [0.01, 0.01]];
+const fix = (lon, lat, accuracy = 5) => ({lon, lat, accuracy, timestamp: Date.now()});
+const start = api.measure(points, fix(0, 0));
+assert.ok(Math.abs(start.remaining - 2224) < 2);
+const halfway = api.measure(points, fix(0.01, 0));
+assert.ok(Math.abs(halfway.percent - 50) < 0.1);
+assert.ok(halfway.offset < 0.1);
+assert.ok(api.measure(points, fix(0.01, 0.005)).remaining < halfway.remaining);
+assert.ok(api.measure(points, fix(0.005, 0)).remaining > halfway.remaining); // Backtracking.
+assert.equal(api.measure([[0, 0], [0, 0]], fix(0, 0)), null);
+assert.equal(api.measure([[0, 0], [0.01, 0], [0, 0]], fix(0.005, 0)).ambiguous, true);
+api.setRoute({coordinates: points});
+assert.match(panel.textContent, /Start tracking/);
+api.update(fix(0.01, 0));
+assert.match(panel.textContent, /remaining.*50%/);
+api.update(fix(0.02, 0.005));
+assert.match(panel.textContent, /off route/);
+assert.doesNotMatch(panel.textContent, /remaining/);
+api.update(fix(0.01, 0, 100));
+assert.match(panel.textContent, /accuracy is low/);
+api.update({...fix(0.01, 0), timestamp: Date.now() - 16000});
+assert.match(panel.textContent, /fresh GPS/);
+api.update(fix(0.01, 0.01));
+assert.match(panel.textContent, /Near the end/);
+api.clear();
+assert.equal(panel.hidden, true);
+console.log('Route progress checks passed: distances, remaining length, backtracking, crossings, poor GPS, stale fixes, off-route, endpoint, and cleanup.');

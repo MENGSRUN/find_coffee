@@ -37,7 +37,7 @@ const assert = require("node:assert/strict");
     assert.equal(googleParams.get("origin"), "11.5564,104.9282");
     assert.equal(googleParams.get("destination"), `${cafe.latitude},${cafe.longitude}`);
     assert.equal(googleParams.get("travelmode"), "walking");
-    assert.match(await page.locator("#distance-note").innerText(), /30 nearby cafés/);
+    assert.match(await page.locator("#distance-note").innerText(), /30 matching cafés/);
     await page.getByRole("button", {name: "Show route on map"}).click();
     await page.getByText("Turn left onto Test Street", {exact: false}).waitFor();
     await page.locator("#route-map .leaflet-interactive").first().waitFor();
