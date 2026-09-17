@@ -21,4 +21,14 @@ class CoffeeRepository(Protocol):
         query: str = "",
     ) -> dict: ...
 
+    def within_area(
+        self,
+        latitude: float,
+        longitude: float,
+        geometry: dict,
+        limit: int | None,
+        page: int,
+        query: str = "",
+    ) -> dict: ...
+
     def get_cafe(self, osm_type: str, osm_id: int) -> dict | None: ...

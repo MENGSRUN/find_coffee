@@ -254,3 +254,31 @@ def test_forbidden_does_not_misdiagnose_quota_as_invalid_key(monkeypatch):
         HostedRouter("test-key").post("/test", {})
     assert "account.heigit.org" in str(error.value)
     assert "private provider diagnostic" not in str(error.value)
+
+
+@pytest.mark.parametrize("status", [400, 500, 502, 503, 504])
+def test_walking_area_error_identifies_provider_status_safely(monkeypatch, caplog, status):
+    mock_response(monkeypatch, {"error": "private diagnostic secret-key"}, status)
+    with pytest.raises(RoutingError) as error:
+        HostedRouter("secret-key").walking_area(104.9282, 11.5564, 5)
+    assert f"HTTP {status}" in str(error.value)
+    assert "walking area" in str(error.value)
+    assert "Phnom Penh" in str(error.value)
+    assert "/v2/isochrones/foot-walking" in caplog.text
+    for sensitive in ("secret-key", "private diagnostic", "104.9282", "11.5564"):
+        assert sensitive not in str(error.value) + caplog.text
+
+
+@pytest.mark.parametrize(
+    ("path", "accept"),
+    [
+        ("/v2/isochrones/foot-walking", "application/geo+json"),
+        ("/v2/directions/foot-walking/geojson", "application/geo+json"),
+        ("/v2/directions/driving-car/geojson", "application/geo+json"),
+        ("/v2/matrix/foot-walking", "application/json"),
+    ],
+)
+def test_endpoint_negotiates_its_response_format(monkeypatch, path, accept):
+    post = mock_response(monkeypatch, {"ok": True})
+    HostedRouter("test-key").post(path, {})
+    assert post.call_args.kwargs["headers"]["Accept"] == accept

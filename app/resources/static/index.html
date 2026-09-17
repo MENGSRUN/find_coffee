@@ -26,19 +26,21 @@
   <main>
     <section class="intro">
       <div class="eyebrow">A LITTLE EXPLORING. A GOOD CUP.</div>
-      <h1>Your next coffee,<br><em>closer than you think.</em></h1>
-      <p class="intro-copy">From your everyday stop to somewhere new.<br>Find the cafés around you, one cup at a time.</p>
+      <h1>Find your next coffee.</h1>
+      <p class="intro-copy">Search nearby, follow a route, or explore a short walk.</p>
     </section>
     <div class="workspace">
       <section class="search-panel" aria-labelledby="search-heading">
         <div class="panel-top"><span class="eyebrow">START HERE</span><span class="compass" aria-hidden="true">↗</span></div>
-        <h2 id="search-heading">Where are you <br>having coffee?</h2>
+        <h2 id="search-heading">Choose your search</h2>
         <p>Use your location to discover nearby spots.</p>
         <button class="location-button" id="locate" type="button"><span aria-hidden="true">⌖</span> Use my location <span aria-hidden="true">→</span></button>
-        <p class="privacy">Road searches share your location with openrouteservice. Maps load from OpenStreetMap. This app doesn’t save your location.</p>
-        <div class="radius-control routing-control"><label for="profile">Travel by</label><select id="profile"><option value="walking">Walking</option><option value="driving">Driving</option></select></div>
-        <div class="radius-control routing-control"><label for="distance-mode">Compare by</label><select id="distance-mode"><option value="road">Road distance</option><option value="straight">Straight line</option></select></div>
-        <div class="radius-control"><label for="radius">Look within</label><select id="radius"><option value="500">500 meters</option><option value="1000">1 kilometer</option><option value="3000" selected>3 kilometers</option><option value="5000">5 kilometers</option><option value="10000">10 kilometers</option><option value="25000">25 kilometers</option></select></div>
+        <p class="privacy">Road and walking-area searches share your location with openrouteservice. Maps load from OpenStreetMap. This app doesn’t save your location.</p>
+        <div class="radius-control routing-control"><label for="distance-mode">Search by</label><select id="distance-mode"><option value="road">Road distance</option><option value="straight">Straight line</option><option value="walk_area">Walking-time area</option></select></div>
+        <div id="profile-control" class="radius-control routing-control"><label for="profile">Travel by</label><select id="profile"><option value="walking">Walking</option><option value="driving">Driving</option></select></div>
+        <div id="radius-control" class="radius-control"><label for="radius">Look within</label><select id="radius"><option value="500">500 meters</option><option value="1000">1 kilometer</option><option value="3000" selected>3 kilometers</option><option value="5000">5 kilometers</option><option value="10000">10 kilometers</option><option value="25000">25 kilometers</option></select></div>
+        <div id="walk-control" class="radius-control" hidden><label for="walk-minutes">Walk for</label><select id="walk-minutes"><option value="5">5 minutes</option><option value="10" selected>10 minutes</option><option value="15">15 minutes</option></select></div>
+        <p id="walk-help" class="privacy" hidden>Shade the estimated area reachable on foot, then find cafés inside. Individual routes may take longer.</p>
         <div class="divider"></div>
         <p class="try-label">Just looking around?</p>
         <button id="demo" class="text-button" type="button">Explore central Phnom Penh <span aria-hidden="true">↗</span></button>
@@ -76,9 +78,10 @@
         <section id="cafes-map-panel" class="cafes-map-panel" aria-labelledby="cafes-map-title" hidden>
           <div class="cafes-map-heading"><h3 id="cafes-map-title">Cafés around you</h3><button id="search-map-area" class="map-button" type="button">Search this map area</button><button id="fit-cafes" class="map-button" type="button">Show all results</button></div>
           <p id="cafes-map-summary" class="map-summary"></p>
+          <p id="walk-area-summary" class="map-summary" hidden></p>
           <div id="cafes-map" role="region" aria-label="Map of café search results"></div>
           <p class="map-legend"><span class="origin-dot" aria-hidden="true"></span> Search location <span class="cafe-dot" aria-hidden="true"></span> Numbered cafés match the list; groups show café counts</p>
-          <p class="map-summary">Blue arrow = GPS location with phone compass direction; blue dot = location only; shaded circle = GPS accuracy. Map north is up.</p>
+          <details class="map-help"><summary>Map guide</summary><p class="map-summary">Blue arrow = GPS location with phone compass direction; blue dot = location only; shaded circle = GPS accuracy. Map north is up.</p><p class="map-summary">Green shaded area = estimated walking reach. Area by <a href="https://openrouteservice.org/" target="_blank" rel="noopener noreferrer">openrouteservice</a>.</p></details>
           <p id="cafes-map-note" class="distance-note" role="status" hidden></p>
         </section>
         <section id="route-panel" class="route-panel" aria-labelledby="route-title" hidden>

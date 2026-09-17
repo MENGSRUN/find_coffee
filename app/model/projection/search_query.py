@@ -12,7 +12,8 @@ class NearbyQuery:
     radius_m: float = 3000
     limit: int | Literal["all"] = 10
     page: int = 1
-    distance_mode: Literal["straight", "road"] = "straight"
+    walk_minutes: Literal[5, 10, 15] = 10
+    distance_mode: Literal["straight", "road", "walk_area"] = "straight"
     profile: Literal["walking", "driving"] = "walking"
 
 

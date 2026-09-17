@@ -73,10 +73,12 @@ function ensureCafesMap() {
   return true;
 }
 
-function renderCafesMap(cafes, snapshot, roadMode) {
+function renderCafesMap(cafes, snapshot, roadMode, area) {
   $("cafes-map-summary").textContent = `${cafes.length} cafés on this page. Tap a group to expand it, or a numbered marker for café details.`;
   if (!ensureCafesMap()) return;
   cafesLayer = L.featureGroup().addTo(cafesMap);
+  if (area) L.geoJSON(area, {style: {color: "#287b59", weight: 2, fillOpacity: 0.16},
+    interactive: false}).addTo(cafesLayer);
   cafeClusters = typeof L.markerClusterGroup === "function" ? L.markerClusterGroup({
     maxClusterRadius: 45, showCoverageOnHover: false, animate: false,
     iconCreateFunction: cluster => {
@@ -139,6 +141,7 @@ const configReady = fetch("/api/v1/config", {signal: configController.signal}).t
   if (!routingAvailable) {
     $("distance-mode").value = "straight";
     $("distance-mode").querySelector('[value="road"]').disabled = true;
+    $("distance-mode").querySelector('[value="walk_area"]').disabled = true;
     $("routing-status").textContent = "Road routing isn’t connected yet. You can browse cafés using clearly labeled straight-line distances.";
     $("routing-status").hidden = false;
   }
@@ -146,9 +149,10 @@ const configReady = fetch("/api/v1/config", {signal: configController.signal}).t
   routingAvailable = false;
   $("distance-mode").value = "straight";
   $("distance-mode").querySelector('[value="road"]').disabled = true;
+  $("distance-mode").querySelector('[value="walk_area"]').disabled = true;
   $("routing-status").textContent = "Routing availability couldn’t be checked. Using straight-line search for now; reload to try again.";
   $("routing-status").hidden = false;
-}).finally(() => clearTimeout(configTimeout));
+}).finally(() => { clearTimeout(configTimeout); syncSearchControls(); });
 
 const distanceText = (meters) => meters < 1000 ? `${Math.round(meters)} m` : `${(meters / 1000).toFixed(1)} km`;
 const timeText = (seconds) => seconds < 60 ? "<1 min" : `${Math.ceil(seconds / 60)} min`;
@@ -190,6 +194,7 @@ function clearResults(label) {
   $("empty").hidden = true;
   $("distance-note").hidden = true;
   $("search-scope").hidden = true;
+  $("walk-area-summary").hidden = true;
   $("pagination").hidden = true;
 }
 
@@ -284,7 +289,10 @@ function render(data, snapshot) {
     fragment.append(card);
   });
   $("results").replaceChildren(fragment);
-  renderCafesMap(cafes, snapshot, roadMode);
+  renderCafesMap(cafes, snapshot, roadMode, data.area);
+  $("walk-area-summary").hidden = !data.area;
+  $("walk-area-summary").textContent = data.area
+    ? `${data.walk_minutes}-minute walking area · estimated reach, not a guaranteed arrival time` : "";
   const total = data.total ?? cafes.length;
   currentPage = snapshot.page;
   totalPages = Math.ceil(total / snapshot.page_size);
@@ -292,9 +300,11 @@ function render(data, snapshot) {
     ? `${total} ${total === 1 ? "café" : "cafés"} ranked by road`
     : `${total} ${total === 1 ? "café" : "cafés"} found`;
   $("search-scope").hidden = false;
-  $("search-scope").textContent = roadMode
-    ? `Road mode checked all ${data.candidate_count} cafés matching your radius and name search; ${data.unreachable_count} could not be routed. Cards show both distances for the same café.`
-    : `Found ${total} mapped cafés within the straight-line radius. Road mode checks all matching cafés, but unreachable places are excluded and the order may differ. Compare the same café and starting location when checking distances.`;
+  $("search-scope").textContent = data.area
+    ? `${total} cafés in the estimated ${data.walk_minutes}-minute walking area. Distances below are straight-line distances.`
+    : roadMode
+    ? `Road mode checked all ${data.candidate_count} matching cafés; ${data.unreachable_count} could not be routed.`
+    : `Found ${total} mapped cafés within the straight-line radius.`;
   $("pagination").hidden = false;
   const start = cafes.length ? (currentPage - 1) * snapshot.page_size + 1 : 0;
   const end = cafes.length ? start + cafes.length - 1 : 0;
@@ -303,11 +313,15 @@ function render(data, snapshot) {
   $("first-page").disabled = $("previous-page").disabled = currentPage <= 1;
   $("next-page").disabled = $("last-page").disabled = currentPage >= totalPages;
   $("distance-note").hidden = cafes.length === 0;
-  $("distance-note").textContent = roadMode
+  $("distance-note").textContent = data.area
+    ? "Cafés are selected by the walking-area boundary and sorted by straight-line distance. Choose Show route on map to check a café’s estimated walking time."
+    : roadMode
     ? `Sorted by road distance among ${data.candidate_count} matching cafés checked. ${data.unreachable_count} unreachable or over 100 m from a routable road. Distances follow roads between matched points; road access gaps are not included. Search radius is straight-line; routes may be longer. Times are estimates.`
     : "Sorted by straight-line distance, not road distance. Choose Show route on map for a specific route when routing is connected.";
   notice(cafes.length ? "" : nameQuery
     ? "No cafés match this name within the search area. Clear the search or try another name."
+    : data.area
+    ? "No mapped cafés in this walking area. Try a longer walk or another starting point."
     : roadMode
     ? "No reachable cafés found among the nearby places checked. Try a wider radius or another travel mode."
     : "No mapped cafés within this distance. Try a wider radius or explore Phnom Penh.");
@@ -319,22 +333,22 @@ async function search(page = 1, reuseRoad = false) {
   const run = begin();
   await configReady;
   if (run !== generation || !origin) return;
-  const snapshot = {lat: origin.lat, lon: origin.lon, label: origin.label, profile: $("profile").value, distance_mode: $("distance-mode").value,
+  const snapshot = {lat: origin.lat, lon: origin.lon, label: origin.label, profile: $("distance-mode").value === "walk_area" ? "walking" : $("profile").value, distance_mode: $("distance-mode").value,
     page, page_size: $("page-size").value === "all" ? 0 : Number($("page-size").value)};
   controller = new AbortController();
   const active = controller;
   const timeout = setTimeout(() => active.abort(), snapshot.distance_mode === "road" ? 300000 : 40000);
   $("location-info").hidden = false;
   $("location-info").textContent = origin.label;
-  notice(snapshot.distance_mode === "road" ? "Checking routes for all matching cafés… Larger searches may take a few minutes." : "Finding your next coffee…");
+  notice(snapshot.distance_mode === "walk_area" ? "Finding your walking area…" : snapshot.distance_mode === "road" ? "Checking routes for all matching cafés… Larger searches may take a few minutes." : "Finding your next coffee…");
   try {
     let data = roadResults;
     if (!data) {
-      const road = snapshot.distance_mode === "road";
+      const road = snapshot.distance_mode !== "straight";
       const response = await fetch("/api/v1/nearby", {
         method: "POST", headers: {"Content-Type": "application/json"},
         body: JSON.stringify({latitude: snapshot.lat, longitude: snapshot.lon, radius_m: Number($("radius").value),
-          limit: road ? "all" : (snapshot.page_size || "all"), page: road ? 1 : page, profile: snapshot.profile, distance_mode: snapshot.distance_mode, query: nameQuery}),
+          limit: road ? "all" : (snapshot.page_size || "all"), page: road ? 1 : page, profile: snapshot.profile, distance_mode: snapshot.distance_mode, query: nameQuery, walk_minutes: Number($("walk-minutes").value)}),
         signal: active.signal,
       });
       if (!response.ok) throw await apiError(response);
@@ -344,7 +358,7 @@ async function search(page = 1, reuseRoad = false) {
     }
     if (run === generation) {
       if (snapshot.page_size === 0) snapshot.page_size = Math.max(data.total ?? data.cafes.length, 1);
-      if (snapshot.distance_mode === "road") {
+      if (snapshot.distance_mode !== "straight") {
         const offset = (page - 1) * snapshot.page_size;
         data = {...data, total: data.total ?? data.cafes.length,
           cafes: data.cafes.slice(offset, offset + snapshot.page_size)};
@@ -406,7 +420,15 @@ $("demo").addEventListener("click", () => {
 });
 $("radius").addEventListener("change", () => { if (!locating) search(); });
 $("profile").addEventListener("change", () => { if (!locating) search(); });
-$("distance-mode").addEventListener("change", () => { if (!locating) search(); });
+function syncSearchControls() {
+  const walk = $("distance-mode").value === "walk_area";
+  $("walk-control").hidden = $("walk-help").hidden = !walk;
+  $("radius-control").hidden = walk;
+  $("profile-control").hidden = walk || $("distance-mode").value === "straight";
+}
+syncSearchControls();
+$("distance-mode").addEventListener("change", () => { syncSearchControls(); if (!locating) search(); });
+$("walk-minutes").addEventListener("change", () => { if (!locating) search(); });
 $("close-route").addEventListener("click", closeRoute);
 $("search-map-area").addEventListener("click", () => {
   if (!cafesMap || !Number.isFinite(cafesMap.getZoom())) return;
@@ -415,7 +437,7 @@ $("search-map-area").addEventListener("click", () => {
   window.coffeeTracking?.pauseFollow();
   finishLocating();
   origin = {lat: center.lat, lon: center.wrap().lng,
-    label: "Searching around the map center · using your selected radius"};
+    label: "Searching around the map center · using your selected search area"};
   nameQuery = $("cafe-search").value.trim();
   search();
 });

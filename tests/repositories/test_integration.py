@@ -209,3 +209,37 @@ def test_details_migration_preserves_existing_cafes(seeded_db, monkeypatch):
     command.upgrade(Config("alembic.ini"), "head")
     command.upgrade(Config("alembic.ini"), "head")
     assert len(nearest(dsn, 11.5564, 104.9282, 100)) == len(cafes)
+
+
+def test_walking_polygon_filters_holes_boundary_name_and_pagination(seeded_db):
+    from app.repository.place_repository import CoffeeRepository
+
+    dsn, cafes = seeded_db
+    # A small synthetic area: points inside, on its boundary, in a hole, and outside.
+    polygon = {
+        "type": "Polygon",
+        "coordinates": [
+            [[104, 11], [105, 11], [105, 12], [104, 12], [104, 11]],
+            [[104.4, 11.4], [104.6, 11.4], [104.6, 11.6], [104.4, 11.6], [104.4, 11.4]],
+        ],
+    }
+    with psycopg.connect(dsn) as connection:
+        connection.execute("TRUNCATE coffee_shops")
+    import_cafes(
+        dsn,
+        [
+            replace(cafes[0], latitude=11.2, longitude=104.2, name="Area inside"),
+            replace(cafes[1], latitude=11, longitude=104, name="Area boundary"),
+            replace(cafes[2], latitude=11.5, longitude=104.5, name="Area hole"),
+            replace(cafes[3], latitude=13, longitude=106, name="Area outside"),
+        ],
+    )
+    repo = CoffeeRepository(dsn)
+    result = repo.within_area(11.2, 104.2, polygon, None, 1)
+    assert result["total"] == 2
+    assert [row["name"] for row in result["cafes"]] == ["Area inside", "Area boundary"]
+    page = repo.within_area(11.2, 104.2, polygon, 1, 2)
+    assert page["total"] == 2
+    assert page["cafes"][0]["name"] == "Area boundary"
+    assert repo.within_area(11.2, 104.2, polygon, 10, 1, query="hole")["total"] == 0
+    assert repo.within_area(11.2, 104.2, polygon, 10, 1, query="inside")["total"] == 1

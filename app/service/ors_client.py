@@ -1,11 +1,14 @@
 """Hosted openrouteservice HTTP adapter."""
 
+import logging
 import math
 
 import requests
 
 from app.constant.routing import MAX_SNAP_DISTANCE_M, ORS_URL, PROFILES
 from app.exception.errors import RoutingError
+
+logger = logging.getLogger(__name__)
 
 
 def metric(value):
@@ -36,12 +39,18 @@ class HostedRouter:
 
     def post(self, path: str, body: dict):
         self.require_key()
+        # Isochrones and GeoJSON directions negotiate a different media type than matrices.
+        accept = (
+            "application/geo+json"
+            if path.startswith("/v2/isochrones/") or path.endswith("/geojson")
+            else "application/json"
+        )
         try:
             response = requests.post(
                 ORS_URL + path,
                 headers={
                     "Authorization": self.api_key,
-                    "Accept": "application/json",
+                    "Accept": accept,
                     "User-Agent": "find-coffee-cambodia/0.1",
                 },
                 json=body,
@@ -52,6 +61,9 @@ class HostedRouter:
             raise RoutingError(
                 "The routing service could not be reached. Please try again.", 503
             ) from exc
+        if response.status_code != 200:
+            # Do not log request headers, coordinates, or provider response bodies.
+            logger.warning("ORS endpoint %s returned HTTP %s", path, response.status_code)
         if response.status_code == 401:
             raise RoutingError(
                 "The routing API key was rejected. Check the server configuration.", 503
@@ -67,12 +79,28 @@ class HostedRouter:
                 "The routing service limit was reached. Wait before trying again.", 429
             )
         if response.status_code in (400, 404):
+            if path.startswith("/v2/isochrones/"):
+                raise RoutingError(
+                    "ORS could not calculate a walking area here "
+                    f"(HTTP {response.status_code}). Try a nearby starting point "
+                    "or Explore central Phnom Penh.",
+                    422,
+                )
             raise RoutingError(
                 "No route could be calculated for these locations. Try another café.", 422
             )
         if response.status_code != 200:
+            if path.startswith("/v2/isochrones/"):
+                raise RoutingError(
+                    f"ORS could not return the walking area (HTTP {response.status_code}). "
+                    "Try again shortly. If it keeps failing, try Explore central Phnom Penh "
+                    "to check whether the problem is specific to this starting point.",
+                    503,
+                )
             raise RoutingError(
-                "The routing service is temporarily unavailable. Please try again.", 503
+                "The routing service is temporarily unavailable "
+                f"(HTTP {response.status_code}). Please try again.",
+                503,
             )
         try:
             payload = response.json()
@@ -81,6 +109,50 @@ class HostedRouter:
             return payload
         except ValueError as exc:
             raise RoutingError("The routing service returned an invalid response.") from exc
+
+    def walking_area(self, longitude: float, latitude: float, minutes: int) -> dict:
+        """Return a validated WGS84 polygon for an estimated walk from the origin."""
+        payload = self.post(
+            "/v2/isochrones/foot-walking",
+            {
+                "locations": [[longitude, latitude]],
+                "range": [minutes * 60],
+                "range_type": "time",
+                "location_type": "start",
+            },
+        )
+        try:
+            features = payload["features"]
+            if not isinstance(features, list) or len(features) != 1:
+                raise ValueError("Expected one walking area")
+            geometry = features[0]["geometry"]
+            kind, coordinates = geometry["type"], geometry["coordinates"]
+            if kind not in ("Polygon", "MultiPolygon") or not coordinates:
+                raise ValueError("Missing polygon")
+            polygons = [coordinates] if kind == "Polygon" else coordinates
+            for polygon in polygons:
+                if not isinstance(polygon, list) or not polygon:
+                    raise ValueError("Empty polygon")
+                for ring in polygon:
+                    if not isinstance(ring, list) or len(ring) < 4 or ring[0] != ring[-1]:
+                        raise ValueError("Unclosed ring")
+                    for point in ring:
+                        if (
+                            not isinstance(point, list)
+                            or len(point) != 2
+                            or any(
+                                isinstance(v, bool)
+                                or not isinstance(v, (int, float))
+                                or not math.isfinite(v)
+                                for v in point
+                            )
+                            or not -180 <= point[0] <= 180
+                            or not -90 <= point[1] <= 90
+                        ):
+                            raise ValueError("Invalid polygon point")
+            return {"type": kind, "coordinates": coordinates}
+        except (KeyError, TypeError, ValueError, IndexError) as exc:
+            raise RoutingError("The routing service returned an invalid walking area.") from exc
 
     def rank(self, longitude: float, latitude: float, cafes: list[dict], profile: str):
         self.require_key()

@@ -237,3 +237,13 @@ all matching cafés in straight-line mode, preserving radius/name filters and
 returning a single page. Road mode checks all matching cafés;
 All shows the full reachable result set without another routing call. Switching
 page size resets to page one. All can render many markers and cards at once.
+
+## Walking-time area and search UI
+
+The nearby endpoint also accepts `distance_mode: "walk_area"` and `walk_minutes`
+(5, 10, or 15). The ORS adapter returns a walking polygon; the repository filters
+cafés using PostGIS coverage and preserves name search and pagination. The UI
+shows a green area and hides radius/travel controls for this mode. The introduction
+and search notices are shorter, and map guidance is collapsible. See
+[WALKING_AREA.md](WALKING_AREA.md) for the request flow, estimate limitations,
+provider requirements, and verification steps.

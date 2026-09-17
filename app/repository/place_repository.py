@@ -1,5 +1,6 @@
 """Database operations; PostGIS performs all distance calculations."""
 
+import json
 import math
 from importlib.resources import files
 
@@ -85,6 +86,7 @@ def nearest_page(
     radius_m: float,
     page: int,
     query: str = "",
+    area: dict | None = None,
 ) -> dict:
     """Count and page the same spatial result set in one database snapshot."""
     with connect(dsn, row_factory=dict_row) as connection:
@@ -99,7 +101,12 @@ def nearest_page(
                        c.latitude, c.longitude, c.address, c.opening_hours, c.phone, c.website,
                        ST_Distance(c.location, u.location) AS distance_m
                 FROM public.coffee_shops c CROSS JOIN user_position u
-                WHERE ST_DWithin(c.location, u.location, %(radius)s)
+                WHERE ((%(area)s::text IS NULL AND ST_DWithin(c.location, u.location, %(radius)s))
+                    OR (%(area)s::text IS NOT NULL
+                        AND ST_Intersects(c.location,
+                            ST_SetSRID(ST_GeomFromGeoJSON(%(area)s), 4326)::geography)
+                        AND ST_Covers(ST_SetSRID(ST_GeomFromGeoJSON(%(area)s), 4326),
+                                      c.location::geometry)))
                   AND (%(query)s = '' OR strpos(
                       lower(concat_ws(' ', c.name, c.name_en, c.name_km)),
                       lower(%(query)s)) > 0)
@@ -119,6 +126,7 @@ def nearest_page(
                 "limit": limit,
                 "offset": (page - 1) * limit if limit is not None else 0,
                 "query": query.strip(),
+                "area": json.dumps(area) if area is not None else None,
             },
         ).fetchone()
 
@@ -148,6 +156,17 @@ class CoffeeRepository:
         if query:
             return nearest_page(self.dsn, latitude, longitude, limit, radius_m, page, query=query)
         return nearest_page(self.dsn, latitude, longitude, limit, radius_m, page)
+
+    def within_area(
+        self,
+        latitude: float,
+        longitude: float,
+        geometry: dict,
+        limit: int | None,
+        page: int,
+        query: str = "",
+    ) -> dict:
+        return nearest_page(self.dsn, latitude, longitude, limit, 0, page, query, area=geometry)
 
     def get_cafe(self, osm_type: str, osm_id: int) -> dict | None:
         return get_cafe(self.dsn, osm_type, osm_id)

@@ -43,7 +43,7 @@ find_coffee/
 │   ├── security/
 │   │   └── http_security.py            # Browser security/privacy headers
 │   ├── service/
-│   │   ├── place_service.py            # Nearby search and ranking
+│   │   ├── place_service.py            # Nearby, walking-area search and ranking
 │   │   ├── road_service.py             # Selected-route use case
 │   │   ├── routing_gateway.py          # Routing capability contract
 │   │   ├── ors_client.py               # Hosted ORS HTTP adapter

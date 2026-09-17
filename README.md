@@ -327,3 +327,10 @@ previously stored details; populated details update on reimport. This conservati
 does not automatically remove outdated contact information. To clear a known incorrect
 value, explicitly update that column in PostGIS. Opening hours are displayed as raw OSM
 text and are not used to claim that a business is currently open.
+
+## Walking-time search
+
+Choose **Walking-time area** and a **5-, 10-, or 15-minute** walk to display an
+estimated walking boundary and cafés inside it. Uses your existing ORS key with
+isochrones access. See [WALKING_AREA.md](docs/WALKING_AREA.md) for setup, behavior,
+and testing. Café distances remain clearly labeled straight-line distances.

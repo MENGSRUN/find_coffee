@@ -27,6 +27,23 @@ class CoffeeService:
         limit = None if body.limit == "all" else body.limit
         page = 1 if limit is None else body.page
         query = body.query.strip()
+        if body.distance_mode == "walk_area":
+            self.routing.require_key()
+            geometry = self.routing.walking_area(body.longitude, body.latitude, body.walk_minutes)
+            result = self.repository.within_area(
+                body.latitude, body.longitude, geometry, limit, page, query=query
+            )
+            return {
+                **result,
+                "cafes": [cafe_response(row) for row in result["cafes"]],
+                "distance_mode": "walk_area",
+                "profile": "walking",
+                "walk_minutes": body.walk_minutes,
+                "area": geometry,
+                "page": page,
+                "page_size": result["total"] if limit is None else limit,
+                "total_pages": total_pages(result["total"], limit),
+            }
         if body.distance_mode == "road":
             self.routing.require_key()
             filters = {"query": query} if query else {}

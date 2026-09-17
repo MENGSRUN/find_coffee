@@ -14,5 +14,6 @@ class NearbyRequest(BaseRequest):
     radius_m: Annotated[float, Field(gt=0, le=50000)] = 3000
     limit: Annotated[int, Field(ge=1, le=100)] | Literal["all"] = 10
     page: Annotated[int, Field(ge=1, le=1000000)] = 1
-    distance_mode: Literal["straight", "road"] = "straight"
+    walk_minutes: Literal[5, 10, 15] = 10
+    distance_mode: Literal["straight", "road", "walk_area"] = "straight"
     profile: Literal["walking", "driving"] = "walking"
