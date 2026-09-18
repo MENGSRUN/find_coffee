@@ -334,3 +334,15 @@ Choose **Walking-time area** and a **5-, 10-, or 15-minute** walk to display an
 estimated walking boundary and cafés inside it. Uses your existing ORS key with
 isochrones access. See [WALKING_AREA.md](docs/WALKING_AREA.md) for setup, behavior,
 and testing. Café distances remain clearly labeled straight-line distances.
+
+## QGIS visualization (optional)
+
+Open the current PostGIS café data in a browser-accessible QGIS desktop:
+
+```bash
+docker compose --profile tools up -d qgis
+```
+
+Open **http://localhost:6080**. Inside QGIS, connect to PostgreSQL at **db:5432**
+using your database name and credentials from `.env`. Add `public.coffee_shops`.
+See [QGIS.md](docs/QGIS.md) for connection, layer, and project-saving instructions.

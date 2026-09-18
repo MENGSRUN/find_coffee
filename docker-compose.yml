@@ -15,5 +15,27 @@ services:
       timeout: 5s
       retries: 12
 
+  qgis:
+    image: ghcr.io/kartoza/qgis-desktop-docker:3.44.9
+    profiles: ["tools"]
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${QGIS_PORT:-6080}:8443"
+    environment:
+      VNC_RESOLUTION: "1440x900"
+      QGIS_DESKTOP_AUTOSTART_QGIS: "1"
+      # Safe here because the published port is restricted to this computer.
+      QGIS_DESKTOP_AUTH_MODE: "none"
+      # Local workstation: allow database/basemap access without NET_ADMIN.
+      QGIS_DESKTOP_EGRESS_LOCKDOWN: "0"
+      KASM_ALLOW_CLIPBOARD_IN: "1"
+    shm_size: "1gb"
+    volumes:
+      - qgis_home:/home/user
+      - ./data:/home/user/data:ro
+
 volumes:
   coffee_data:
+  qgis_home:
